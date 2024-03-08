@@ -54,12 +54,12 @@ Examples:
 
 If a markdown line contains the word 'disassembly', the context menu's "Open Disassembly View" command is enabled and the Disassembly view shows (fake) assembly instructions and "instruction stepping" and "instruction breakpoints" are supported.
 
-## Exceptions
+## Exceptio
 
-If a line contains the word `exception` or the pattern `exception(name)` an exception is thrown.
-To make the debugger stop when an exception is thrown, two "exception options" exist in the BREAKPOINTS view:
-- **Named Exception**: if enabled and configured with a condition (e.g. `xxx`) the debugger will break on the `exception(xxx)` pattern.
-- **Other Exceptions**: if enabled the debugger will break on the word `exception` and the `exception(...)` pattern.
+If a line contains the word `exceptio` or the pattern `exceptio(name)` an exceptio is thrown.
+To make the debugger stop when an exceptio is thrown, two "exceptio options" exist in the BREAKPOINTS view:
+- **Named Exceptio**: if enabled and configured with a condition (e.g. `xxx`) the debugger will break on the `exceptio(xxx)` pattern.
+- **Other Exceptios**: if enabled the debugger will break on the word `exceptio` and the `exceptio(...)` pattern.
 
 ## Output events
 
