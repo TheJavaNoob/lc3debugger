@@ -37,7 +37,6 @@ export class LC3 {
     // The current subroutine depth. Used for next/continue.
     public subroutineLevel = 0;
     constructor() {
-        console.log("LC3 Init");
         // Create and initialize memory; load from OS if possible
         this.memory = new Array(0x10000);
         for (var i = 0; i < this.memory.length; i++) {

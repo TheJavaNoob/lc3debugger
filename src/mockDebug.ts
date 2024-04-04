@@ -59,6 +59,7 @@ interface AssemblyResult {
 	symbolTable: Map<string, number>;
 	machineCode: number[];
 	error: string[];
+	lineNumbers: number[];
 }
 
 
@@ -103,6 +104,9 @@ export class MockDebugSession extends LoggingDebugSession {
 
 	private fileAssessor: FileAccessor;
 
+	protected attachPromise!: Promise<void>;
+	protected breakpointsPromise!: Promise<void>;
+
 	/*
 	 * Array of the addresses with breakpoints assigned.
 	 */
@@ -117,8 +121,6 @@ export class MockDebugSession extends LoggingDebugSession {
 		super("mock-debug.txt");
 		this.lc3 = new LC3();
 		this.fileAssessor = fileAccessor;
-
-		console.log("MockDebugSession constructor");
 
 		// this debugger uses zero-based lines and columns
 		this.setDebuggerLinesStartAt1(false);
@@ -167,7 +169,6 @@ export class MockDebugSession extends LoggingDebugSession {
 	 * to interrogate the features the debug adapter provides.
 	 */
 	protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-		console.log('initializeRequest');
 		if (args.supportsProgressReporting) {
 			this._reportProgress = true;
 		}
@@ -224,8 +225,8 @@ export class MockDebugSession extends LoggingDebugSession {
 		response.body.supportsReadMemoryRequest = false;
 		response.body.supportsWriteMemoryRequest = false;
 
-		response.body.supportSuspendDebuggee = false;
-		response.body.supportTerminateDebuggee = false;
+		response.body.supportSuspendDebuggee = true;
+		response.body.supportTerminateDebuggee = true;
 		response.body.supportsFunctionBreakpoints = true;
 		response.body.supportsDelayedStackTraceLoading = false;
 
@@ -237,6 +238,24 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.sendEvent(new InitializedEvent());
 	}
 
+	protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, args: DebugProtocol.ConfigurationDoneArguments): void {
+		super.configurationDoneRequest(response, args);
+
+		// notify the launchRequest that configuration has finished
+		this._configurationDone.notify();
+	}
+
+	protected threadsRequest(response: DebugProtocol.ThreadsResponse): void {
+
+		// runtime supports no threads so just return a default thread.
+		response.body = {
+			threads: [
+				new Thread(MockDebugSession.threadID, "thread 1"),
+			]
+		};
+		this.sendResponse(response);
+	}
+
 	private output(category: string, text: string, filePath?: string, line?: number, column?: number) {
 		const e: DebugProtocol.OutputEvent = new OutputEvent(`${text}\n`, category);
 
@@ -246,7 +265,7 @@ export class MockDebugSession extends LoggingDebugSession {
 		}
 
 		if (filePath) {
-			e.body.source = this.createSource(filePath);
+			e.body.source = this.createSource();
 		}
 		if (line) {
 			e.body.line = this.convertDebuggerLineToClient(line);
@@ -257,51 +276,30 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.sendEvent(e);
 	}
 
-	private async enterBatchMode() {
-		this.batchMode = true;
-
-		// Also, don't run at all if the LC-3 is halted.
-		var done = !this.lc3.isRunning();
-
-		while (!done) {
-			// Execute the next instruction and store the op.
-			var op = this.lc3.nextInstruction();
-			if (this.lc3.subroutineLevel <= this.target){
-				// we've returned from the target subroutine
-				done = true;
-				this.batchMode = false;
-				return;
-			}
-			// Check if we've hit a breakpoint.
-			if (this.breakpointAddresses.includes(this.lc3.pc)) {
-				done = true;
-				this.batchMode = false;
-				return this.sendEvent(new StoppedEvent('breakpoint', MockDebugSession.threadID));
-			}
-			if (this.lc3.isRunning()) {// we've halted
-				done = true;
-				this.batchMode = false;
-				return this.sendEvent(new TerminatedEvent());
-			}
-		}
-	}
-
-	/**
-	 * Called at the end of the configuration sequence.
-	 * Indicates that all breakpoints etc. have been sent to the DA and that the 'launch' can start.
-	 */
-	protected configurationDoneRequest(response: DebugProtocol.ConfigurationDoneResponse, args: DebugProtocol.ConfigurationDoneArguments): void {
-		super.configurationDoneRequest(response, args);
-
-		// notify the launchRequest that configuration has finished
-		this._configurationDone.notify();
-	}
-
-	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
-		console.log(`disconnectRequest suspend: ${args.suspendDebuggee}, terminate: ${args.terminateDebuggee}`);
-	}
+	
 
 	protected async attachRequest(response: DebugProtocol.AttachResponse, args: IAttachRequestArguments) {
+		this.attachPromise = new Promise(async (resolve, reject) => {
+			this.programPath = args.program;
+			let userCodeBytes = await this.fileAssessor.readFile(args.program);
+			let userCode = new TextDecoder().decode(userCodeBytes);
+			this.assemblyResult = assemble(userCode);
+			if (this.assemblyResult === undefined) { resolve(); return; }
+			if (this.assemblyResult.error) {
+				var errorList = this.assemblyResult.error;
+				this.sendErrorResponse(response, {
+					id: 1001,
+					format: `Assembly failed: ${errorList.join('\n')}`,
+					showUser: true
+				});
+				resolve();
+				return;
+			}
+			this.lc3.loadAssembled(this.assemblyResult);
+			resolve();
+		});
+		await this.attachPromise;
+		await this.breakpointsPromise;
 		return this.launchRequest(response, args);
 	}
 
@@ -311,35 +309,64 @@ export class MockDebugSession extends LoggingDebugSession {
 	protected async launchRequest(response: DebugProtocol.LaunchResponse, args: ILaunchRequestArguments) {
 		// make sure to 'Stop' the buffered logging if 'trace' is not set
 		logger.setup(Logger.LogLevel.Verbose, false);
-		console.log('launchRequest');
 		// wait until configuration has finished (and configurationDoneRequest has been called)
 		// removed a one-second wait
 		await this._configurationDone;
-
-		this.programPath = args.program;
-		let userCodeBytes = await this.fileAssessor.readFile(args.program);
-		let userCode = new TextDecoder().decode(userCodeBytes);
-		this.assemblyResult = assemble(userCode);
-		if (this.assemblyResult === undefined) { return; }
-		if (this.assemblyResult.error) {
-			var errorList = this.assemblyResult.error;
-			this.sendErrorResponse(response, {
-				id: 1001,
-				format: `Assembly failed: ${errorList.join('\n')}`,
-				showUser: true
-			});
-			return;
-		}
-		this.lc3.loadAssembled(this.assemblyResult);
 		this.sendResponse(response);
 		this.target = -Infinity;
 		await this.enterBatchMode();
-		console.log('finished execution');
+		return response;
 	}
 
+	private async enterBatchMode(isRecoveredFromBreakpoint: boolean = false) {
+		this.batchMode = true;
+
+		// Also, don't run at all if the LC-3 is halted.
+		var done = !this.lc3.isRunning();
+
+		while (!done) {
+			// Go to the next instruction if we're recovering from a breakpoint.
+			if(isRecoveredFromBreakpoint){var op = this.lc3.nextInstruction();}
+			// Check if we've hit a breakpoint
+			if (this.breakpointAddresses.includes(this.lc3.pc)) {
+				console.log('pause because breakpoint hit');
+				done = true;
+				this.batchMode = false;
+				return this.sendEvent(new StoppedEvent('breakpoint', MockDebugSession.threadID));
+			}
+			// Execute the next instruction and store the op.
+			if (this.lc3.subroutineLevel <= this.target) {
+				// we've returned from the target subroutine
+				done = true;
+				this.batchMode = false;
+				console.log('paused because subroutine return');	
+				return;
+			}
+			if (!this.lc3.isRunning()) {// we've halted
+				done = true;
+				this.batchMode = false;
+				console.log('paused because halted');
+				return this.sendEvent(new TerminatedEvent());
+			}
+			var op = this.lc3.nextInstruction();
+		}
+	}
+
+	/**
+	 * Called at the end of the configuration sequence.
+	 * Indicates that all breakpoints etc. have been sent to the DA and that the 'launch' can start.
+	 */
+	protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments, request?: DebugProtocol.Request): void {
+		console.log(`disconnectRequest suspend: ${args.suspendDebuggee}, terminate: ${args.terminateDebuggee}`);
+	}
+
+	/*
+	* Run the program forever
+	* aka "Run" in LC3 Web
+	*/
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
-		this.target = this.lc3.subroutineLevel;
-		this.enterBatchMode();
+		this.target = -Infinity;
+		this.enterBatchMode(true);
 		this.sendResponse(response);
 	}
 
@@ -385,39 +412,59 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.enterBatchMode();
 		this.sendResponse(response);
 	}
-
-	protected async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
-		//TODO set breakpoints
-		const path = args.source.path as string;
-		if (path !== this.programPath) {
-			this.sendResponse(response);
-			return;
-		}
-		const clientLines = args.lines || [];
-
-		// save the lines for lc3
-		//this.breakpointLines = clientLines.map(l => this.convertClientLineToDebugger(l));
-
-		// set and verify breakpoint locations
-		const actualBreakpoints = clientLines.map(line => {
-			// TODO verify breakpoint location
-			const bp = new Breakpoint(true, line) as DebugProtocol.Breakpoint;
-			bp.id = this.breakpointID++;
-			this.breakpointAddresses.push(this.getAddressFromLine(line));
-			return bp;
-		});
-		// send back the actual breakpoint positions
+	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
+		const frames = new Array<StackFrame>();
+		const line = this.getLineFromAddress(this.lc3.pc);
+		frames.push(new StackFrame(0, `line ${line}`, this.createSource(), line, 0));
 		response.body = {
-			breakpoints: actualBreakpoints
+		    stackFrames: frames,
+		    totalFrames: frames.length
 		};
 		this.sendResponse(response);
+	  }
+
+	protected async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
+		console.log('setBreakPointsRequest');
+		if (this.attachPromise) {
+			await this.attachPromise;
+		}
+		this.breakpointsPromise = new Promise(async (resolve, reject) => {
+			const path = args.source.path as string;
+			if (path !== this.programPath) {
+				this.sendResponse(response);
+				return;
+			}
+			const clientLines = args.lines || [];
+
+			// save the lines for lc3
+			//this.breakpointLines = clientLines.map(l => this.convertClientLineToDebugger(l));
+
+			// set and verify breakpoint locations
+			this.breakpointAddresses = [];
+			const actualBreakpoints = clientLines.map(line => {
+				let address = this.getAddressFromLine(line);
+				if (address === -1) {
+					return new Breakpoint(false, line) as DebugProtocol.Breakpoint;
+				}
+				const bp = new Breakpoint(true, line) as DebugProtocol.Breakpoint;
+				bp.id = this.breakpointID++;
+				this.breakpointAddresses.push(address);
+				return bp;
+			});
+			// send back the actual breakpoint positions
+			response.body = {
+				breakpoints: actualBreakpoints
+			};
+			this.sendResponse(response);
+			resolve();
+		});
+
 	}
 
 	/*
 	* Returns all breakpoints.
 	*/
 	protected breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request): void {
-		// TODO breakpointLocationsRequest
 		if (!args.source.path) {
 			response.body = {
 				breakpoints: this.breakpointLines.map(col => {
@@ -477,7 +524,7 @@ export class MockDebugSession extends LoggingDebugSession {
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): Promise<void> {
 		const v = this._variableHandles.get(args.variablesReference);
 		console.log(v);
-		if (v === 'registers'){
+		if (v === 'registers') {
 			const registers = this.lc3.getRegisters();
 			response.body = {
 				variables: registers.map((r, i) => {
@@ -739,64 +786,64 @@ export class MockDebugSession extends LoggingDebugSession {
 		return value;
 	}
 	*/
-/*
-	private convertFromRuntime(v: RuntimeVariable): DebugProtocol.Variable {
-		
-		let dapVariable: DebugProtocol.Variable = {
-			name: v.name,
-			value: '???',
-			type: typeof v.value,
-			variablesReference: 0,
-			evaluateName: '$' + v.name
-		};
-
-		if (v.name.indexOf('lazy') >= 0) {
-			// a "lazy" variable needs an additional click to retrieve its value
-
-			dapVariable.value = 'lazy var';		// placeholder value
-			v.reference ??= this._variableHandles.create(new RuntimeVariable('', [new RuntimeVariable('', v.value)]));
-			dapVariable.variablesReference = v.reference;
-			dapVariable.presentationHint = { lazy: true };
-		} else {
-
-			if (Array.isArray(v.value)) {
-				dapVariable.value = 'Object';
-				v.reference ??= this._variableHandles.create(v);
+	/*
+		private convertFromRuntime(v: RuntimeVariable): DebugProtocol.Variable {
+			
+			let dapVariable: DebugProtocol.Variable = {
+				name: v.name,
+				value: '???',
+				type: typeof v.value,
+				variablesReference: 0,
+				evaluateName: '$' + v.name
+			};
+	
+			if (v.name.indexOf('lazy') >= 0) {
+				// a "lazy" variable needs an additional click to retrieve its value
+	
+				dapVariable.value = 'lazy var';		// placeholder value
+				v.reference ??= this._variableHandles.create(new RuntimeVariable('', [new RuntimeVariable('', v.value)]));
 				dapVariable.variablesReference = v.reference;
+				dapVariable.presentationHint = { lazy: true };
 			} else {
-
-				switch (typeof v.value) {
-					case 'number':
-						if (Math.round(v.value) === v.value) {
-							dapVariable.value = this.formatNumber(v.value);
-							(<any>dapVariable).__vscodeVariableMenuContext = 'simple';	// enable context menu contribution
-							dapVariable.type = 'integer';
-						} else {
-							dapVariable.value = v.value.toString();
-							dapVariable.type = 'float';
-						}
-						break;
-					case 'string':
-						dapVariable.value = `"${v.value}"`;
-						break;
-					case 'boolean':
-						dapVariable.value = v.value ? 'true' : 'false';
-						break;
-					default:
-						dapVariable.value = typeof v.value;
-						break;
+	
+				if (Array.isArray(v.value)) {
+					dapVariable.value = 'Object';
+					v.reference ??= this._variableHandles.create(v);
+					dapVariable.variablesReference = v.reference;
+				} else {
+	
+					switch (typeof v.value) {
+						case 'number':
+							if (Math.round(v.value) === v.value) {
+								dapVariable.value = this.formatNumber(v.value);
+								(<any>dapVariable).__vscodeVariableMenuContext = 'simple';	// enable context menu contribution
+								dapVariable.type = 'integer';
+							} else {
+								dapVariable.value = v.value.toString();
+								dapVariable.type = 'float';
+							}
+							break;
+						case 'string':
+							dapVariable.value = `"${v.value}"`;
+							break;
+						case 'boolean':
+							dapVariable.value = v.value ? 'true' : 'false';
+							break;
+						default:
+							dapVariable.value = typeof v.value;
+							break;
+					}
 				}
 			}
+	
+			if (v.memory) {
+				v.reference ??= this._variableHandles.create(v);
+				dapVariable.memoryReference = String(v.reference);
+			}
+	
+			return dapVariable;
 		}
-
-		if (v.memory) {
-			v.reference ??= this._variableHandles.create(v);
-			dapVariable.memoryReference = String(v.reference);
-		}
-
-		return dapVariable;
-	}
-		*/
+			*/
 
 	private formatAddress(x: number, pad = 8) {
 		return 'mem' + (this._addressesInHex ? '0x' + x.toString(16).padStart(8, '0') : x.toString(10));
@@ -806,15 +853,22 @@ export class MockDebugSession extends LoggingDebugSession {
 		return this._valuesInHex ? '0x' + x.toString(16) : x.toString(10);
 	}
 
-	private createSource(filePath: string): Source {
-		return new Source(basename(filePath), this.convertDebuggerPathToClient(filePath), undefined, undefined, 'mock-adapter-data');
+	private createSource(): Source {
+		return new Source(basename(this.programPath), this.programPath, undefined, undefined, 'lc3');
 	}
 
-	private getAddressFromLine(line: number){
-		// Assume starts at x3000, change later
-		// Line starts at 1
-		console.log(line);
-		return 0x3000 + line - 1;
+	private getAddressFromLine(clientLine: number): number {
+		// Parameter line starts at 1, assemblyResult lineNumbers starts at 0
+		var machineCodeRef = this.assemblyResult!.lineNumbers.findIndex((machineCodeLine, i) => machineCodeLine === clientLine - 1) || 0;
+		if (machineCodeRef === -1) {
+			return -1;
+		}
+		return machineCodeRef + this.assemblyResult!.orig || 0;
 	}
+
+	private getLineFromAddress(address: number): number {
+		return this.assemblyResult!.lineNumbers[address - this.assemblyResult!.orig] + 1;
+	}
+
 }
 

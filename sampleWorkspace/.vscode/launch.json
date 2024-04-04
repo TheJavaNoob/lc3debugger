@@ -6,7 +6,7 @@
 	"configurations": [
 		{
 			"type": "mock",
-			"request": "launch",
+			"request": "attach",
 			"name": "Debug main.asm",
 			"program": "${workspaceFolder}/main.asm",
 		},

@@ -12,7 +12,6 @@ import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken 
 import { MockDebugSession, FileAccessor } from './mockDebug';
 
 export function activateMockDebug(context: vscode.ExtensionContext, factory?: vscode.DebugAdapterDescriptorFactory) {
-	console.log("Mock Debug Activated");
 	context.subscriptions.push(
 		// Commmand for running the currently active editor contents
 		vscode.commands.registerCommand('extension.mock-debug.runEditorContents', (resource: vscode.Uri) => {

@@ -2,6 +2,7 @@
 // You can find the source at github:wchargin/lc3 in src/core/assemble.js.
 // I'll publish the new version when it's ready! :)
 export var assemble = (function() {
+    // Implement includes for Array and String if they don't exist.
     if (!Array.prototype.includes) {
       Array.prototype.includes = function(searchElement /*, fromIndex*/ ) {
         'use strict';
@@ -53,6 +54,7 @@ export var assemble = (function() {
      * and either a "result" or "errorMessage" key
      * containing either the result of a successful invocation
      * or the text of the error thrown during a failed invocation.
+     * Each line of machine code is corresponded with a 0-based line number.
      *
      * For example, if f = handleErrors((x) => x.y),
      * then f({ y: 1 }) = { success: true, result: 1 },
@@ -121,6 +123,9 @@ export var assemble = (function() {
     /*
      * Decorate the given callback such that any error messages it throws
      * will have the given context and ": " prepended.
+     * Takes in a callback function and a context string.
+     * If no error occurs, returns the same function.
+     * If an error occurs, returns the same function with modified error message.
      *
      * For example, if context is "while doing a thing"
      * and the callback ends up throwing an error "something happened,"
@@ -130,6 +135,7 @@ export var assemble = (function() {
     function withContext(callback, context) {
         return function () {
             try {
+                // Call the callback with "this" set to undefined and the original arguments passed through.
                 return callback.apply(undefined, arguments);
             } catch (e) {
                 throw new Error(context + ': ' + e.message);
@@ -313,9 +319,17 @@ export var assemble = (function() {
         formatConditionCode: formatConditionCode
     };
 
+
+    // Main assemble function
     function assemble(text) {
         var result = handleErrors(function () {
+            /*Returns an array of lines; each line is an array of tokens.
+            * Comma-separated operands are smashed into one token.
+            * Comments are stripped.
+            * Strings are resolved, and an error is thrown if they are invalid.
+            */
             var tokenizedLines = tokenize(text);
+    
 
             var _findOrig = findOrig(tokenizedLines);
 
@@ -327,8 +341,10 @@ export var assemble = (function() {
             var symbolTable = _buildSymbolTable.symbolTable;
             var programLength = _buildSymbolTable.programLength;
 
-            var machineCode = generateMachineCode(tokenizedLines, symbolTable, orig, begin);
-            return { orig: orig, symbolTable: symbolTable, machineCode: machineCode };
+            var _generateMachineCode = generateMachineCode(tokenizedLines, symbolTable, orig, begin);
+            var linesNumbers = _generateMachineCode.lineNumbers;
+            var machineCode = _generateMachineCode.machineCode;
+            return { orig: orig, symbolTable: symbolTable, machineCode: machineCode, lineNumbers: linesNumbers, programLength: programLength };
         })(text);
 
         if (result.success) {
@@ -987,28 +1003,31 @@ export var assemble = (function() {
     function generateMachineCode(lines, symbols, orig, begin) {
         var initialState = {
             machineCode: [],
+            lineNumbers: [],
             address: orig,
             seenEndDirective: false
         };
-        var appendCode = function appendCode(state, code) {
+        var appendCode = function appendCode(state, code, lineIndex) {
             return _extends({}, state, {
                 machineCode: state.machineCode.concat(code),
-                address: state.address + code.length
+                address: state.address + code.length,
+                // line numbers starts at zero, add one to account for orig
+                lineNumbers: state.lineNumbers.concat(lineIndex + 1)
             });
         };
         var handlers = {
-            handleDirective: function handleDirective(state, line) {
+            handleDirective: function handleDirective(state, line, lineIndex) {
                 if (state.seenEndDirective) {
                     return state;
                 }
-                return appendCode(state, encodeDirective(line));
+                return appendCode(state, encodeDirective(line), lineIndex);
             },
-            handleInstruction: function handleInstruction(state, line) {
+            handleInstruction: function handleInstruction(state, line, lineIndex) {
                 if (state.seenEndDirective) {
                     return state;
                 }
                 var pc = state.address + 1;
-                return appendCode(state, encodeInstruction(line, pc, symbols));
+                return appendCode(state, encodeInstruction(line, pc, symbols), lineIndex);
             },
             handleEnd: function handleEnd(state) {
                 return _extends({}, state, { seenEndDirective: true });
@@ -1019,13 +1038,20 @@ export var assemble = (function() {
         if (!finalState.seenEndDirective) {
             throw new Error("missing .END directive");
         }
-        return finalState.machineCode;
+        return finalState;
     }
-
+    /*
+        * Given lines of assembly code, a starting line number, and a set of handlers.
+        * Looks at each line and handles: empty lines, labels, directives, and instructions.
+        * Each of the elements are passed to an appropriate handler, which is provided to either generate the 
+        * machine code or the symbol table.
+    */
     function reduceProgram(lines, begin, handlers, initialState) {
+        // Retrieves handlers from the handlers object, or uses the identity function if not present.
         var id = function id(x) {
             return x;
         };
+        // handleLabel is undefined when called from generateMachineCode, it just returns the state
         var _handlers$handleLabel = handlers.handleLabel;
         var handleLabel = _handlers$handleLabel === undefined ? id : _handlers$handleLabel;
         var _handlers$handleDirective = handlers.handleDirective;
@@ -1044,31 +1070,42 @@ export var assemble = (function() {
         var commands = [].concat(_toConsumableArray(trapVectors), instructions, directives);
 
         var program = lines.slice(begin);
+
+        // Accumulate the state of the program as we go through it.
+        // accumulator: current state of the program; 
+        // current value: the current tokenized line
+        // current index: the current line number
         return program.reduce(function (state, line, lineIndex) {
+            // If the line is empty, skip it.
             if (line.length === 0) {
                 return state;
             }
 
-            var ctx = 'at line ' + (lineIndex + begin + 1);
-            var delegate = function delegate(cb) {
+            var context = 'at line ' + (lineIndex + begin + 1);
+
+            // Modifies the error message with context
+            var decorateCallbackWithContext = function decorateCallbackWithContext(callback) {
+                // If called with only one argument, fills in the state and line with the current values
                 var _state = arguments.length <= 1 || arguments[1] === undefined ? state : arguments[1];
 
                 var _line = arguments.length <= 2 || arguments[2] === undefined ? line : arguments[2];
 
-                return withContext(cb, ctx)(_state, _line, lineIndex);
+                // Call the modified callback with the given arguments (or filled in ones)
+                return withContext(callback, context)(_state, _line, lineIndex);
             };
 
-            var fst = line[0];
-            if (fst.toUpperCase() === ".END") {
-                return delegate(handleEnd);
+            var firstToken = line[0];
+            if (firstToken.toUpperCase() === ".END") {
+                return decorateCallbackWithContext(handleEnd);
             }
 
-            var hasLabel = !commands.includes(fst.toUpperCase());
-            if (hasLabel && !isValidLabelName(fst)) {
-                throw new Error(ctx + ': this line looks like a label, ' + ('but \'' + fst + '\' is not a valid label name; ') + 'you either misspelled an instruction ' + 'or entered an invalid name for a label');
+            // If it isn't a directive or an instruction, it should be a label.
+            var hasLabel = !commands.includes(firstToken.toUpperCase());
+            if (hasLabel && !isValidLabelName(firstToken)) {
+                throw new Error(context + ': this line looks like a label, ' + ('but \'' + firstToken + '\' is not a valid label name; ') + 'you either misspelled an instruction ' + 'or entered an invalid name for a label');
             }
 
-            var labeledState = hasLabel ? delegate(handleLabel) : state;
+            var labeledState = hasLabel ? decorateCallbackWithContext(handleLabel) : state;
             var rest = line.slice(hasLabel ? 1 : 0);
 
             if (rest.length === 0) {
@@ -1080,9 +1117,9 @@ export var assemble = (function() {
             var isDirective = command.charAt(0) === '.';
             var pc = state.address + 1;
             if (isDirective) {
-                return delegate(handleDirective, labeledState, rest);
+                return decorateCallbackWithContext(handleDirective, labeledState, rest);
             } else {
-                return delegate(handleInstruction, labeledState, rest);
+                return decorateCallbackWithContext(handleInstruction, labeledState, rest);
             }
         }, initialState);
     }
