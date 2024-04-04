@@ -813,7 +813,7 @@ export class MockDebugSession extends LoggingDebugSession {
 	private getAddressFromLine(line: number){
 		// Assume starts at x3000, change later
 		// Line starts at 1
-		console.log(line)
+		console.log(line);
 		return 0x3000 + line - 1;
 	}
 }
