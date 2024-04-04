@@ -16,7 +16,7 @@ import { FileAccessor } from './mockRuntime';
  * Since here we run the debug adapter as a separate ("external") process, it has no access to VS Code API.
  * So we can only use node.js API for accessing files.
  */
-const fsAccessor:  FileAccessor = {
+const fsAccessor: FileAccessor = {
 	isWindows: process.platform === 'win32',
 	readFile(path: string): Promise<Uint8Array> {
 		return fs.readFile(path);

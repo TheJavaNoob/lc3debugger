@@ -9,12 +9,12 @@
 
 import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
-import { MockDebugSession } from './mockDebug';
-import { FileAccessor } from './mockRuntime';
+import { MockDebugSession, FileAccessor } from './mockDebug';
 
 export function activateMockDebug(context: vscode.ExtensionContext, factory?: vscode.DebugAdapterDescriptorFactory) {
-
+	console.log("Mock Debug Activated");
 	context.subscriptions.push(
+		// Commmand for running the currently active editor contents
 		vscode.commands.registerCommand('extension.mock-debug.runEditorContents', (resource: vscode.Uri) => {
 			let targetResource = resource;
 			if (!targetResource && vscode.window.activeTextEditor) {
@@ -31,6 +31,7 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 				);
 			}
 		}),
+		// Command for debugging the currently active editor contents
 		vscode.commands.registerCommand('extension.mock-debug.debugEditorContents', (resource: vscode.Uri) => {
 			let targetResource = resource;
 			if (!targetResource && vscode.window.activeTextEditor) {
@@ -46,6 +47,7 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 				});
 			}
 		}),
+		// Command for formatting
 		vscode.commands.registerCommand('extension.mock-debug.toggleFormatting', (variable) => {
 			const ds = vscode.debug.activeDebugSession;
 			if (ds) {
@@ -56,8 +58,8 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 
 	context.subscriptions.push(vscode.commands.registerCommand('extension.mock-debug.getProgramName', config => {
 		return vscode.window.showInputBox({
-			placeHolder: "Please enter the name of a markdown file in the workspace folder",
-			value: "readme.md"
+			placeHolder: "Please enter the name of a lc3 file to debug",
+			value: ""
 		});
 	}));
 
@@ -96,7 +98,7 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 	}
 	context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('mock', factory));
 	if ('dispose' in factory) {
-		context.subscriptions.push(factory);
+		//context.subscriptions.push(factory);
 	}
 
 	// override VS Code's default implementation of the debug hover

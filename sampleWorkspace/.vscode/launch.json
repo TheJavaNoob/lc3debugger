@@ -7,18 +7,8 @@
 		{
 			"type": "mock",
 			"request": "launch",
-			"name": "Debug readme.md",
-			"program": "${workspaceFolder}/readme.md",
-			"stopOnEntry": true,
-			"trace": false
+			"name": "Debug main.asm",
+			"program": "${workspaceFolder}/main.asm",
 		},
-		{
-			"type": "mock",
-			"request": "attach",
-			"name": "Attach readme.md",
-			"program": "${workspaceFolder}/readme.md",
-			"stopOnEntry": true,
-			"trace": false
-		}
 	]
 }

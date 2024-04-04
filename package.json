@@ -2,10 +2,10 @@
     "name": "mock-debug",
     "displayName": "Mock Debug",
     "version": "0.52.0",
-    "publisher": "ms-vscode",
-    "description": "Starter extension for developing debug adapters for VS Code.",
+    "publisher": "TheJavaNoob",
+    "description": "A vscode debugger for LC3.",
     "author": {
-        "name": "Microsoft Corporation"
+        "name": "Steve Lin"
     },
     "license": "MIT",
     "keywords": [
@@ -148,30 +148,6 @@
                                 "type": "string",
                                 "description": "Absolute path to a text file.",
                                 "default": "${workspaceFolder}/${command:AskForProgramName}"
-                            },
-                            "stopOnEntry": {
-                                "type": "boolean",
-                                "description": "Automatically stop after launch.",
-                                "default": true
-                            },
-                            "trace": {
-                                "type": "boolean",
-                                "description": "Enable logging of the Debug Adapter Protocol.",
-                                "default": true
-                            },
-                            "compileError": {
-                                "type": "string",
-                                "description": "Simulates a compile error in 'launch' request.",
-                                "enum": [
-                                    "default",
-                                    "show",
-                                    "hide"
-                                ],
-                                "enumDescriptions": [
-                                    "default: show fake compile error to user",
-                                    "show fake compile error to user",
-                                    "do not show fake compile error to user"
-                                ]
                             }
                         }
                     },
