@@ -113,6 +113,13 @@ export class MockDebugSession extends LoggingDebugSession {
 	private breakpointAddresses: number[] = [];
 	private breakpointLines = [];
 
+
+	/*
+	* Array of the addresses where the program counter has been.
+	* used for finding line number in case pc enters os territory.
+	*/
+	private pcTrace: number[] = [];
+
 	/**
 	 * Creates a new debug adapter that is used for one debug session.
 	 * We configure the default implementation of a debug adapter here.
@@ -250,7 +257,7 @@ export class MockDebugSession extends LoggingDebugSession {
 		// runtime supports no threads so just return a default thread.
 		response.body = {
 			threads: [
-				new Thread(MockDebugSession.threadID, "thread 1"),
+				new Thread(MockDebugSession.threadID, "Main thread"),
 			]
 		};
 		this.sendResponse(response);
@@ -320,13 +327,21 @@ export class MockDebugSession extends LoggingDebugSession {
 
 	private async enterBatchMode(isRecoveredFromBreakpoint: boolean = false) {
 		this.batchMode = true;
+		var done = false;
 
 		// Also, don't run at all if the LC-3 is halted.
-		var done = !this.lc3.isRunning();
+		if (!this.lc3.isRunning()) {
+			this.sendEvent(new StoppedEvent('halted', MockDebugSession.threadID));
+			return;
+		}
 
 		while (!done) {
+			console.log(this.lc3.pc);
 			// Go to the next instruction if we're recovering from a breakpoint.
-			if(isRecoveredFromBreakpoint){var op = this.lc3.nextInstruction();}
+			if(isRecoveredFromBreakpoint){
+				var op = this.lc3.nextInstruction();
+				this.pcTrace.push(this.lc3.pc);
+			}
 			// Check if we've hit a breakpoint
 			if (this.breakpointAddresses.includes(this.lc3.pc)) {
 				console.log('pause because breakpoint hit');
@@ -334,21 +349,21 @@ export class MockDebugSession extends LoggingDebugSession {
 				this.batchMode = false;
 				return this.sendEvent(new StoppedEvent('breakpoint', MockDebugSession.threadID));
 			}
-			// Execute the next instruction and store the op.
 			if (this.lc3.subroutineLevel <= this.target) {
 				// we've returned from the target subroutine
 				done = true;
 				this.batchMode = false;
 				console.log('paused because subroutine return');	
-				return;
+				return this.sendEvent(new StoppedEvent('step', MockDebugSession.threadID));
 			}
 			if (!this.lc3.isRunning()) {// we've halted
 				done = true;
 				this.batchMode = false;
 				console.log('paused because halted');
-				return this.sendEvent(new TerminatedEvent());
+				return this.sendEvent(new StoppedEvent('halt', MockDebugSession.threadID));
 			}
 			var op = this.lc3.nextInstruction();
+			this.pcTrace.push(this.lc3.pc);
 		}
 	}
 
@@ -377,8 +392,34 @@ export class MockDebugSession extends LoggingDebugSession {
 	 */
 	protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
 		this.target = this.lc3.subroutineLevel;
-		this.enterBatchMode();
+		this.enterBatchMode(true);
+		this.sendResponse(response);
+	}
+
+	/**
+	 * Step forward and go into a subroutine if necessary.
+	 * aka "Step" in LC3 Web
+	 */
+	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
+		// Refuse to step in if the LC3 is halted.
+		if (!this.lc3.isRunning()) {
+			this.sendEvent(new StoppedEvent('halted', MockDebugSession.threadID));
+			return;
+		}
 		this.lc3.nextInstruction();
+		this.pcTrace.push(this.lc3.pc);
+		this.sendEvent(new StoppedEvent('step', MockDebugSession.threadID));
+		console.log('stepInRequest ' + this.lc3.pc);
+		this.sendResponse(response);
+	}
+
+	/**
+	 * Keep going until we go one level up.
+	 * aka "Finish" in LC3 web
+	 */
+	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
+		this.target = this.lc3.subroutineLevel - 1;
+		this.enterBatchMode(true);
 		this.sendResponse(response);
 	}
 
@@ -394,24 +435,11 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.sendResponse(response);
 	}
 
-	/**
-	 * Step forward and go into a subroutine if necessary.
-	 * aka "Step" in LC3 Web
-	 */
-	protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
-		this.lc3.nextInstruction();
-		this.sendResponse(response);
-	}
-
-	/**
-	 * Keep going until we go one level up.
-	 * aka "Finish" in LC3 web
-	 */
-	protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
-		this.target = this.lc3.subroutineLevel - 1;
-		this.enterBatchMode();
-		this.sendResponse(response);
-	}
+	/*
+	* Called when the user clicks "pause".
+	* Returns the stack frame at the current pc, used to tell the editor the current line.
+	* Currently the stack frame is just the current line. May implement actual stack frames in the future.
+	*/
 	protected stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): void {
 		const frames = new Array<StackFrame>();
 		const line = this.getLineFromAddress(this.lc3.pc);
@@ -423,6 +451,10 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.sendResponse(response);
 	  }
 
+	  /* 
+	  * Called immediately after attachRequest. Used Promise to wait for the assembly to finish.
+	  * 
+	  */
 	protected async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
 		console.log('setBreakPointsRequest');
 		if (this.attachPromise) {
@@ -462,15 +494,17 @@ export class MockDebugSession extends LoggingDebugSession {
 	}
 
 	/*
-	* Returns all breakpoints.
+	* Returns all breakpoint-able lines. Regardless of start and eng line requirements?
 	*/
 	protected breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request): void {
-		if (!args.source.path) {
+		console.log("breakpointLocationsRequest");
+		if (args.source.path) {
 			response.body = {
-				breakpoints: this.breakpointLines.map(col => {
+				// assembly line number starts at 0, client line number starts at 1
+				breakpoints: this.assemblyResult!.lineNumbers.map(line => {
 					return {
-						line: args.line,
-						column: this.convertDebuggerColumnToClient(col)
+						line: line + 1,
+						column: 0
 					};
 				})
 			};
@@ -489,6 +523,47 @@ export class MockDebugSession extends LoggingDebugSession {
 				new Scope("Registers", this._variableHandles.create('registers'), false),
 			]
 		};
+		this.sendResponse(response);
+	}
+
+	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): Promise<void> {
+		const variableType = this._variableHandles.get(args.variablesReference);
+		if (variableType === 'registers') {
+			response.body = {
+				variables: this.lc3.r.map((r, i) => {
+					return {
+						name: "R" + i,
+						value: this.formatNumber(r),
+						// Not a parent variable
+						variablesReference: 0
+					};
+				})
+			};
+		}
+		this.sendResponse(response);
+	}
+
+	protected setVariableRequest(response: DebugProtocol.SetVariableResponse, args: DebugProtocol.SetVariableArguments): void {
+		/*
+		const container = this._variableHandles.get(args.variablesReference);
+		let rv;
+		if (container === 'locals') {
+			rv = this._runtime.getLocalVariable(args.name);
+		} else if (container instanceof RuntimeVariable && container.value instanceof Array) {
+			rv = container.value.find(v => v.name === args.name);
+		} else {
+			rv = undefined;
+		}
+
+		if (rv) {
+			rv.value = this.convertToRuntime(args.value);
+			response.body = this.convertFromRuntime(rv);
+
+			if (rv.memory && rv.reference) {
+				this.sendEvent(new MemoryEvent(String(rv.reference), 0, rv.memory.length));
+			}
+		}
+		*/
 		this.sendResponse(response);
 	}
 
@@ -521,73 +596,11 @@ export class MockDebugSession extends LoggingDebugSession {
 		this.sendResponse(response);
 	}
 
-	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): Promise<void> {
-		const v = this._variableHandles.get(args.variablesReference);
-		console.log(v);
-		if (v === 'registers') {
-			const registers = this.lc3.getRegisters();
-			response.body = {
-				variables: registers.map((r, i) => {
-					console.log("R" + i + ": " + r.value);
-					return {
-						name: "R" + i,
-						value: this.formatNumber(r.value),
-						variablesReference: i
-					};
-				})
-			};
-		}
-		this.sendResponse(response);
-		/*
-		let vs: RuntimeVariable[] = [];
+	
 
-		const v = this._variableHandles.get(args.variablesReference);
-		if (v === 'locals') {
-			vs = this._runtime.getLocalVariables();
-		} else if (v === 'globals') {
-			if (request) {
-				this._cancellationTokens.set(request.seq, false);
-				vs = await this._runtime.getGlobalVariables(() => !!this._cancellationTokens.get(request.seq));
-				this._cancellationTokens.delete(request.seq);
-			} else {
-				vs = await this._runtime.getGlobalVariables();
-			}
-		} else if (v && Array.isArray(v.value)) {
-			vs = v.value;
-		}
-
-		response.body = {
-			variables: vs.map(v => this.convertFromRuntime(v))
-		};
-		this.sendResponse(response);
-		*/
+	private formatNumber(x: number): string{
+		return this._valuesInHex ? '0x' + x.toString(16) : x.toString(10);
 	}
-
-	protected setVariableRequest(response: DebugProtocol.SetVariableResponse, args: DebugProtocol.SetVariableArguments): void {
-		/*
-		const container = this._variableHandles.get(args.variablesReference);
-		let rv;
-		if (container === 'locals') {
-			rv = this._runtime.getLocalVariable(args.name);
-		} else if (container instanceof RuntimeVariable && container.value instanceof Array) {
-			rv = container.value.find(v => v.name === args.name);
-		} else {
-			rv = undefined;
-		}
-
-		if (rv) {
-			rv.value = this.convertToRuntime(args.value);
-			response.body = this.convertFromRuntime(rv);
-
-			if (rv.memory && rv.reference) {
-				this.sendEvent(new MemoryEvent(String(rv.reference), 0, rv.memory.length));
-			}
-		}
-		*/
-		this.sendResponse(response);
-	}
-
-
 
 	/*
 	* Evaluates the given expression.
@@ -849,10 +862,6 @@ export class MockDebugSession extends LoggingDebugSession {
 		return 'mem' + (this._addressesInHex ? '0x' + x.toString(16).padStart(8, '0') : x.toString(10));
 	}
 
-	private formatNumber(x: number) {
-		return this._valuesInHex ? '0x' + x.toString(16) : x.toString(10);
-	}
-
 	private createSource(): Source {
 		return new Source(basename(this.programPath), this.programPath, undefined, undefined, 'lc3');
 	}
@@ -867,7 +876,15 @@ export class MockDebugSession extends LoggingDebugSession {
 	}
 
 	private getLineFromAddress(address: number): number {
-		return this.assemblyResult!.lineNumbers[address - this.assemblyResult!.orig] + 1;
+		var addressIndex = address - this.assemblyResult!.orig;
+		while (addressIndex > this.assemblyResult!.lineNumbers.length || addressIndex < 0) {
+			// If in os territory, we need to go back the pcTrace to find the line number.
+			if (this.pcTrace.length === 0) {
+				return -1;
+			}
+			addressIndex = this.pcTrace.pop()! - this.assemblyResult!.orig;
+		}
+		return this.assemblyResult!.lineNumbers[addressIndex] + 1;
 	}
 
 }

@@ -4,6 +4,7 @@ import { lc3os, lc3osSymbols } from './lc3_os';
 export class LC3 {
     public memory: number[];
     public listeners: any[];
+    // Registers, starts at R0 and goes to R7.
     public r: number[];
     public specialRegisters: string[];
     public labelToAddress;
