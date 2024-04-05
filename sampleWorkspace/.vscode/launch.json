@@ -5,7 +5,7 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"type": "mock",
+			"type": "lc3",
 			"request": "attach",
 			"name": "Debug main.asm",
 			"program": "${workspaceFolder}/main.asm",

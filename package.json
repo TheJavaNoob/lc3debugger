@@ -1,6 +1,6 @@
 {
-    "name": "mock-debug",
-    "displayName": "Mock Debug",
+    "name": "lc3-debugger",
+    "displayName": "LC-3 Debugger",
     "version": "0.52.0",
     "publisher": "TheJavaNoob",
     "description": "A vscode debugger for LC3.",
@@ -14,17 +14,17 @@
     "engines": {
         "vscode": "^1.66.0"
     },
-    "icon": "images/mock-debug-icon.png",
+    "icon": "images/lc3-debugger-icon.png",
     "categories": [
         "Debuggers"
     ],
     "private": true,
     "repository": {
         "type": "git",
-        "url": "https://github.com/Microsoft/vscode-mock-debug.git"
+        "url": "https://github.com/TheJavaNoob/lc3debugger"
     },
     "bugs": {
-        "url": "https://github.com/Microsoft/vscode-mock-debug/issues"
+        "url": "https://github.com/TheJavaNoob/lc3debugger/issues"
     },
     "scripts": {
         "compile": "tsc -p ./",
@@ -66,9 +66,9 @@
     "main": "./dist/extension.js",
     "browser": "./dist/web-extension.js",
     "activationEvents": [
-        "onDebugResolve:mock",
-        "onDebugDynamicConfigurations:mock",
-        "onCommand:extension.mock-debug.getProgramName"
+        "onDebugResolve:lc3",
+        "onDebugDynamicConfigurations:lc3",
+        "onCommand:extension.lc3-debugger.getProgramName"
     ],
     "workspaceTrust": {
         "request": "never"
@@ -77,50 +77,34 @@
         "menus": {
             "editor/title/run": [
                 {
-                    "command": "extension.mock-debug.runEditorContents",
-                    "when": "resourceLangId == markdown",
-                    "group": "navigation@1"
-                },
-                {
-                    "command": "extension.mock-debug.debugEditorContents",
-                    "when": "resourceLangId == markdown",
+                    "command": "extension.lc3-debugger.debugEditorContents",
+                    "when": "resourceLangId == lc3",
                     "group": "navigation@2"
                 }
             ],
             "commandPalette": [
                 {
-                    "command": "extension.mock-debug.debugEditorContents",
-                    "when": "resourceLangId == markdown"
-                },
-                {
-                    "command": "extension.mock-debug.runEditorContents",
-                    "when": "resourceLangId == markdown"
+                    "command": "extension.lc3-debugger.debugEditorContents",
+                    "when": "resourceLangId == lc3"
                 }
             ],
             "debug/variables/context": [
                 {
-                    "command": "extension.mock-debug.toggleFormatting",
-                    "when": "debugType == 'mock' && debugProtocolVariableMenuContext == 'simple'"
+                    "command": "extension.lc3-debugger.toggleFormatting",
+                    "when": "debugType == 'lc3' && debugProtocolVariableMenuContext == 'simple'"
                 }
             ]
         },
         "commands": [
             {
-                "command": "extension.mock-debug.debugEditorContents",
+                "command": "extension.lc3-debugger.debugEditorContents",
                 "title": "Debug File",
-                "category": "Mock Debug",
+                "category": "LC-3 Debugger",
                 "enablement": "!inDebugMode",
                 "icon": "$(debug-alt)"
             },
             {
-                "command": "extension.mock-debug.runEditorContents",
-                "title": "Run File",
-                "category": "Mock Debug",
-                "enablement": "!inDebugMode",
-                "icon": "$(play)"
-            },
-            {
-                "command": "extension.mock-debug.toggleFormatting",
+                "command": "extension.lc3-debugger.toggleFormatting",
                 "title": "Toggle between decimal and hex formatting"
             }
         ],
@@ -131,11 +115,11 @@
         ],
         "debuggers": [
             {
-                "type": "mock",
+                "type": "lc3",
                 "languages": [
-                    "markdown"
+                    "lc3"
                 ],
-                "label": "Mock Debug",
+                "label": "LC-3 Debugger",
                 "program": "./out/debugAdapter.js",
                 "runtime": "node",
                 "configurationAttributes": {
@@ -190,28 +174,26 @@
                 },
                 "initialConfigurations": [
                     {
-                        "type": "mock",
+                        "type": "lc3",
                         "request": "launch",
-                        "name": "Ask for file name",
-                        "program": "${workspaceFolder}/${command:AskForProgramName}",
-                        "stopOnEntry": true
+                        "name": "LC-3 Debugger",
+                        "program": "${workspaceFolder}/${command:AskForProgramName}"
                     }
                 ],
                 "configurationSnippets": [
                     {
-                        "label": "Mock Debug: Launch",
-                        "description": "A new configuration for 'debugging' a user selected markdown file.",
+                        "label": "LC-3 Debugger",
+                        "description": "Debug a user-specified LC-3 program",
                         "body": {
-                            "type": "mock",
+                            "type": "lc3",
                             "request": "launch",
-                            "name": "Ask for file name",
-                            "program": "^\"\\${workspaceFolder}/\\${command:AskForProgramName}\"",
-                            "stopOnEntry": true
+                            "name": "LC-3 Debugger",
+                            "program": "^\"\\${workspaceFolder}/\\${command:AskForProgramName}\""
                         }
                     }
                 ],
                 "variables": {
-                    "AskForProgramName": "extension.mock-debug.getProgramName"
+                    "AskForProgramName": "extension.lc3-debugger.getProgramName"
                 }
             }
         ]

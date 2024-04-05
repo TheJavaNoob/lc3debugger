@@ -1,9 +1,3 @@
-/*---------------------------------------------------------
- * Copyright (C) Microsoft Corporation. All rights reserved.
- *--------------------------------------------------------*/
-/*
- * activateMockDebug.ts containes the shared extension code that can be executed both in node.js and the browser.
- */
 
 'use strict';
 
@@ -13,32 +7,15 @@ import { MockDebugSession, FileAccessor } from './mockDebug';
 
 export function activateMockDebug(context: vscode.ExtensionContext, factory?: vscode.DebugAdapterDescriptorFactory) {
 	context.subscriptions.push(
-		// Commmand for running the currently active editor contents
-		vscode.commands.registerCommand('extension.mock-debug.runEditorContents', (resource: vscode.Uri) => {
-			let targetResource = resource;
-			if (!targetResource && vscode.window.activeTextEditor) {
-				targetResource = vscode.window.activeTextEditor.document.uri;
-			}
-			if (targetResource) {
-				vscode.debug.startDebugging(undefined, {
-					type: 'mock',
-					name: 'Run File',
-					request: 'launch',
-					program: targetResource.fsPath
-				},
-					{ noDebug: true }
-				);
-			}
-		}),
 		// Command for debugging the currently active editor contents
-		vscode.commands.registerCommand('extension.mock-debug.debugEditorContents', (resource: vscode.Uri) => {
+		vscode.commands.registerCommand('extension.lc3-debugger.debugEditorContents', (resource: vscode.Uri) => {
 			let targetResource = resource;
 			if (!targetResource && vscode.window.activeTextEditor) {
 				targetResource = vscode.window.activeTextEditor.document.uri;
 			}
 			if (targetResource) {
 				vscode.debug.startDebugging(undefined, {
-					type: 'mock',
+					type: 'lc3',
 					name: 'Debug File',
 					request: 'launch',
 					program: targetResource.fsPath,
@@ -47,7 +24,7 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 			}
 		}),
 		// Command for formatting
-		vscode.commands.registerCommand('extension.mock-debug.toggleFormatting', (variable) => {
+		vscode.commands.registerCommand('extension.lc3-debugger.toggleFormatting', (variable) => {
 			const ds = vscode.debug.activeDebugSession;
 			if (ds) {
 				ds.customRequest('toggleFormatting');
@@ -55,37 +32,26 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 		})
 	);
 
-	context.subscriptions.push(vscode.commands.registerCommand('extension.mock-debug.getProgramName', config => {
+	context.subscriptions.push(vscode.commands.registerCommand('extension.lc3-debugger.getProgramName', config => {
 		return vscode.window.showInputBox({
 			placeHolder: "Please enter the name of a lc3 file to debug",
 			value: ""
 		});
 	}));
 
-	// register a configuration provider for 'mock' debug type
+	// register a configuration provider for 'lc3' debug type
 	const provider = new MockConfigurationProvider();
-	context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('mock', provider));
+	context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('lc3', provider));
 
-	// register a dynamic configuration provider for 'mock' debug type
-	context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('mock', {
+	// register a dynamic configuration provider for 'lc3' debug type
+	context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('lc3', {
 		provideDebugConfigurations(folder: WorkspaceFolder | undefined): ProviderResult<DebugConfiguration[]> {
 			return [
+				
 				{
-					name: "Dynamic Launch",
+					name: "LC-3 Launch",
 					request: "launch",
-					type: "mock",
-					program: "${file}"
-				},
-				{
-					name: "Another Dynamic Launch",
-					request: "launch",
-					type: "mock",
-					program: "${file}"
-				},
-				{
-					name: "Mock Launch",
-					request: "launch",
-					type: "mock",
+					type: "lc3",
 					program: "${file}"
 				}
 			];
@@ -95,7 +61,7 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 	if (!factory) {
 		factory = new InlineDebugAdapterFactory();
 	}
-	context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('mock', factory));
+	context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('lc3', factory));
 	if ('dispose' in factory) {
 		//context.subscriptions.push(factory);
 	}
@@ -164,8 +130,8 @@ class MockConfigurationProvider implements vscode.DebugConfigurationProvider {
 		// if launch.json is missing or empty
 		if (!config.type && !config.request && !config.name) {
 			const editor = vscode.window.activeTextEditor;
-			if (editor && editor.document.languageId === 'markdown') {
-				config.type = 'mock';
+			if (editor && editor.document.languageId === 'lc3') {
+				config.type = 'lc3';
 				config.name = 'Launch';
 				config.request = 'launch';
 				config.program = '${file}';
