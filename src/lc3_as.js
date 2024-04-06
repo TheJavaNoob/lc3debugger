@@ -1,6 +1,10 @@
 // Transpiled via Babel.
 // You can find the source at github:wchargin/lc3 in src/core/assemble.js.
 // I'll publish the new version when it's ready! :)
+export var trapVectors = "GETC OUT PUTS IN PUTSP HALT".split(' ');
+export var instructions = ["ADD", "AND", "NOT", "BR", "BRP", "BRZ", "BRZP", "BRN", "BRNP", "BRNZ", "BRNZP", "JMP", "RET", "JSR", "JSRR", "LD", "LDI", "LDR", "LEA", "RTI", "ST", "STI", "STR", "TRAP"];
+export var directives = [".FILL", ".BLKW", ".STRINGZ"];
+export var commands;
 export var assemble = (function() {
     // Implement includes for Array and String if they don't exist.
     if (!Array.prototype.includes) {
@@ -1064,10 +1068,7 @@ export var assemble = (function() {
         // Here are all the things that can come at the start of a line.
         // We use these to determine whether the first token in a line
         // is a label or an actual operation of some kind.
-        var trapVectors = "GETC OUT PUTS IN PUTSP HALT".split(' ');
-        var instructions = ["ADD", "AND", "NOT", "BR", "BRP", "BRZ", "BRZP", "BRN", "BRNP", "BRNZ", "BRNZP", "JMP", "RET", "JSR", "JSRR", "LD", "LDI", "LDR", "LEA", "RTI", "ST", "STI", "STR", "TRAP"];
-        var directives = [".FILL", ".BLKW", ".STRINGZ"];
-        var commands = [].concat(_toConsumableArray(trapVectors), instructions, directives);
+        
 
         var program = lines.slice(begin);
 
@@ -1093,7 +1094,7 @@ export var assemble = (function() {
                 // Call the modified callback with the given arguments (or filled in ones)
                 return withContext(callback, context)(_state, _line, lineIndex);
             };
-
+            commands = [].concat(_toConsumableArray(trapVectors), instructions, directives);
             var firstToken = line[0];
             if (firstToken.toUpperCase() === ".END") {
                 return decorateCallbackWithContext(handleEnd);

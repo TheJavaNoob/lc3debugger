@@ -22,7 +22,7 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import { basename } from 'path-browserify';
 import { Subject } from 'await-notify';
 import { LC3 } from './lc3_core';
-import { assemble } from './lc3_as.js';
+import { assemble, commands } from './lc3_as.js';
 import * as vscode from 'vscode';
 import * as base64 from 'base64-js';
 
@@ -63,7 +63,17 @@ interface AssemblyResult {
 	lineNumbers: number[];
 }
 
+interface StaticArrayVariable {
+	address: number;
+	values: number[];
+	variablesReference: number;
+}
 
+interface DynamicArrayVariable {
+	address: number;
+	length: number;
+	variablesReference: number;
+}
 
 export class MockDebugSession extends LoggingDebugSession {
 	// 
@@ -72,8 +82,9 @@ export class MockDebugSession extends LoggingDebugSession {
 
 	// a Mock runtime (or debugger)
 
-	// 
-	private _variableHandles = new Handles<'registers' | Register>();
+	// A handle is basically a map with auto-generated keys. The key is the variable reference, and the value is either
+	// the type of variable or an array to generate child variables in variablesRequest.
+	private _variableHandles = new Handles<'registers' | 'variables' | StaticArrayVariable>();
 
 	// a map of all running requests
 	private _cancellationTokens = new Map<number, boolean>();
@@ -98,6 +109,7 @@ export class MockDebugSession extends LoggingDebugSession {
 	private batchMode = false;
 
 	private programPath = '';
+	private userCode = '';
 
 	private breakpointID = 0;
 
@@ -296,8 +308,8 @@ export class MockDebugSession extends LoggingDebugSession {
 		logger.setup(Logger.LogLevel.Verbose, false);
 		this.programPath = args.program;
 		let userCodeBytes = await this.fileAssessor.readFile(args.program);
-		let userCode = new TextDecoder().decode(userCodeBytes);
-		this.assemblyResult = assemble(userCode);
+		this.userCode = new TextDecoder().decode(userCodeBytes);
+		this.assemblyResult = assemble(this.userCode);
 		if (this.assemblyResult === undefined) { return; }
 		if (this.assemblyResult.error) {
 			var errorList = this.assemblyResult.error;
@@ -455,9 +467,6 @@ export class MockDebugSession extends LoggingDebugSession {
 		}
 		const clientLines = args.lines || [];
 
-		// save the lines for lc3
-		//this.breakpointLines = clientLines.map(l => this.convertClientLineToDebugger(l));
-
 		// set and verify breakpoint locations
 		this.breakpointAddresses = [];
 		const actualBreakpoints = clientLines.map(line => {
@@ -505,20 +514,46 @@ export class MockDebugSession extends LoggingDebugSession {
 		response.body = {
 			scopes: [
 				new Scope("Registers", this._variableHandles.create('registers'), false),
+				new Scope("Variables", this._variableHandles.create('variables'), false)
 			]
 		};
 		this.sendResponse(response);
 	}
 
 	protected async variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments, request?: DebugProtocol.Request): Promise<void> {
-		const variableType = this._variableHandles.get(args.variablesReference);
-		if (variableType === 'registers') {
+		console.log("variablesRequest");
+		const handleResult = this._variableHandles.get(args.variablesReference);
+		if (handleResult === 'registers') {
+			var registers: DebugProtocol.Variable[] = this.lc3.r.map((r, i) => {
+				return {
+					name: "R" + i,
+					value: this.formatNumber(r),
+					// Not a parent variable
+					variablesReference: 0
+				};
+			});
+			const pc = {
+				name: "PC",
+				value: this.formatNumber(this.lc3.pc),
+				variablesReference: 0
+			};
+			registers = [pc, ...registers];
 			response.body = {
-				variables: this.lc3.r.map((r, i) => {
+				variables: registers
+			};
+		} else if (handleResult === 'variables') {
+			var variables = this.findVariables();
+			response.body = {
+				variables: variables
+			};
+		} else if (handleResult && Array.isArray(handleResult.values)) {
+			// This is a parent variable
+			response.body = {
+				variables: handleResult.values.map((v, i) => {
 					return {
-						name: "R" + i,
-						value: this.formatNumber(r),
-						// Not a parent variable
+						name: i.toString(),
+						value: this.formatNumber(v),
+						memoryReference: (handleResult.address + i).toString(),
 						variablesReference: 0
 					};
 				})
@@ -530,31 +565,24 @@ export class MockDebugSession extends LoggingDebugSession {
 	protected setVariableRequest(response: DebugProtocol.SetVariableResponse, args: DebugProtocol.SetVariableArguments): void {
 		const variableType = this._variableHandles.get(args.variablesReference);
 		if (variableType === "registers") {
-			const registerID = parseInt(args.name.slice(1));
-			this.lc3.r[registerID] = parseInt(args.value);
-			response.body = new Variable(args.name, args.value, 0);
-		}
-
-		/*
-		const container = this._variableHandles.get(args.variablesReference);
-		let rv;
-		if (container === 'locals') {
-			rv = this._runtime.getLocalVariable(args.name);
-		} else if (container instanceof RuntimeVariable && container.value instanceof Array) {
-			rv = container.value.find(v => v.name === args.name);
-		} else {
-			rv = undefined;
-		}
-
-		if (rv) {
-			rv.value = this.convertToRuntime(args.value);
-			response.body = this.convertFromRuntime(rv);
-
-			if (rv.memory && rv.reference) {
-				this.sendEvent(new MemoryEvent(String(rv.reference), 0, rv.memory.length));
+			if (args.name === "PC") {
+				this.lc3.pc = this.parseLC3Number(args.value);
+				response.body = new Variable(args.name, args.value, 0);
+			} else if (args.name.startsWith("R")){
+				const registerID = parseInt(args.name.slice(1));
+				this.lc3.r[registerID] = this.parseLC3Number(args.value);
+				response.body = new Variable(args.name, args.value, 0);
 			}
 		}
-		*/
+		if (variableType === "variables") {
+			const variable = this.findVariables().find(v => v.name === args.name);
+			if (variable) {
+				variable.value = args.value;
+				this.lc3.memory[variable.memoryReference!] = parseInt(args.value);
+				response.body = variable;
+			}
+			this.sendEvent(new MemoryEvent(String(variable?.memoryReference), 0, variable?.value.length! * 2));
+		}
 		this.sendResponse(response);
 	}
 
@@ -562,33 +590,55 @@ export class MockDebugSession extends LoggingDebugSession {
 	* Writes the value of a variable.
 	*/
 	protected async writeMemoryRequest(response: DebugProtocol.WriteMemoryResponse, { data, memoryReference, offset = 0 }: DebugProtocol.WriteMemoryArguments) {
-		/*
-		const variable = this._variableHandles.get(Number(memoryReference));
-		if (typeof variable === 'object') {
-			const decoded = Number(data);
-			variable.value = decoded;
-			response.body = { bytesWritten: 2 };
-		} else {
-			response.body = { bytesWritten: 0 };
+		var startingAddress = parseInt(memoryReference) + offset / 2;
+		var byteArray = base64.toByteArray(data);
+		const writeLength = byteArray.length;
+		if (offset % 2 !== 0) {
+			startingAddress -= 0.5;
+			// If offset is odd, write to the low bits of the memory, then shift the byteArray.
+			this.lc3.memory[startingAddress] = (this.lc3.memory[startingAddress] & 0xFF00) | byteArray[0];
+			console.log(startingAddress, this.lc3.memory[startingAddress]);
+			startingAddress++;
+			byteArray = byteArray.slice(1);
 		}
-		*/
-		// runtime does not support writing memory, so just return a zero bytesWritten.
-		response.body = { bytesWritten: 0 };
+		// Convert byte array to 16-bit memory
+		for (let i = 0; i < byteArray.length ; i += 2) {
+			const highByte = byteArray[i];
+			const lowByte = byteArray[i + 1];
+			this.lc3.memory[startingAddress + i / 2] = (highByte << 8) | lowByte;
+		}
+		response.body = {
+			bytesWritten: writeLength
+		};
 		this.sendResponse(response);
 		this.sendEvent(new InvalidatedEvent(['variables']));
 	}
 
 	protected async readMemoryRequest(response: DebugProtocol.ReadMemoryResponse, { offset = 0, count, memoryReference }: DebugProtocol.ReadMemoryArguments) {
-		console.log("readMemoryRequest");
+		// Memory reference should be a decimal number
+		const maxMemoryAddress = 0xFFFF;
+		// Since offset is in bytes but memory is 16-bit, divide by 2
+		// If offset happen to be odd (attempt to read from the low bits), it is rounded down.
+		// In this case we will force to read from the high bits, adding 1 to unreadableBytes.
+		const startingAddress = parseInt(memoryReference) + offset / 2;
+		const memory = this.lc3.memory.slice(
+			Math.min(startingAddress, maxMemoryAddress),
+			Math.min(startingAddress + count / 2,  maxMemoryAddress),
+		);
+		// Convert 16-bit memory to byte array
+		var byteArray: number[] = [];
+		for (let i = 0; i < memory.length; i++) {
+			const highByte = (memory[i] & 0xFF00) >> 8;
+			const lowByte = memory[i] & 0x00FF;
+			byteArray.push(highByte, lowByte);
+		}
 		response.body = {
-			address: offset.toString(),
-			data: '',
-			unreadableBytes: count
+			address: this.format16BitHex(startingAddress),
+			data: base64.fromByteArray(new Uint8Array(byteArray)),
+			unreadableBytes: count - memory.length
 		};
 		this.sendResponse(response);
 	}
-
-
 
 	private formatNumber(x: number): string {
 		return this._valuesInHex ? '0x' + x.toString(16) : x.toString(10);
@@ -701,6 +751,7 @@ export class MockDebugSession extends LoggingDebugSession {
 	protected disassembleRequest(response: DebugProtocol.DisassembleResponse, args: DebugProtocol.DisassembleArguments) {
 		console.log("disassembleRequest");
 		// Formatting is in principal always hex, preserved redundant code for future use.
+		// memoryReference should be decimal, but it's fine since parseInt will figure it out.
 		const memoryInt = args.memoryReference;
 		const offset = args.instructionOffset || 0;
 		const startAddress = parseInt(memoryInt) + offset;
@@ -798,84 +849,115 @@ export class MockDebugSession extends LoggingDebugSession {
 
 	//---- helpers
 	/*
-	private convertToRuntime(value: string): IRuntimeVariableType {
-
-		value = value.trim();
-
-		if (value === 'true') {
-			return true;
-		}
-		if (value === 'false') {
-			return false;
-		}
-		if (value[0] === '\'' || value[0] === '"') {
-			return value.substr(1, value.length - 2);
-		}
-		const n = parseFloat(value);
-		if (!isNaN(n)) {
-			return n;
-		}
-		return value;
-	}
+	* Find variables marked by the user using "@VARIABLE" in the assembly code.
+	* There are a few types of variables:
+	* 1. A single variable, which is just a label followed by .FILL or .BLKW #1
+	* 2. An array, which is a label followed by .BLKW #n
+	* 3. A declaration marked as @VARIABLE:name:address:length, if length is missing, it's a dynamic array,
+	*   which can only be viewed in memory view.
 	*/
-	/*
-		private generateDAPVariable(v: RuntimeVariable): DebugProtocol.Variable {
-			
-			let dapVariable: DebugProtocol.Variable = {
-				name: v.name,
-				value: '???',
-				type: typeof v.value,
-				variablesReference: 0,
-				evaluateName: '$' + v.name
-			};
-	
-			if (v.name.indexOf('lazy') >= 0) {
-				// a "lazy" variable needs an additional click to retrieve its value
-	
-				dapVariable.value = 'lazy var';		// placeholder value
-				v.reference ??= this._variableHandles.create(new RuntimeVariable('', [new RuntimeVariable('', v.value)]));
-				dapVariable.variablesReference = v.reference;
-				dapVariable.presentationHint = { lazy: true };
-			} else {
-	
-				if (Array.isArray(v.value)) {
-					dapVariable.value = 'Object';
-					v.reference ??= this._variableHandles.create(v);
-					dapVariable.variablesReference = v.reference;
+	private findVariables(): DebugProtocol.Variable[] {
+		const variables: DebugProtocol.Variable[] = [];
+		var userLines = this.userCode.split('\n');
+		userLines.forEach((line, i) => {
+			if (line.replace(' ', '') === ';@VARIABLE') {
+				// The next line should start with a label, which we will use as the variable name.
+				// If it is empty, we will just use the line number.
+
+				var nextLine = userLines[i + 1].trim().split(';')[0];
+				var name: string;
+				var nextCommand: string;
+				if (commands.includes(nextLine.split(' ')[0])) {return;}
+				if (nextLine.split(' ').length > 1) {
+					// If the lable and other stuff is on the same line.
+					name = nextLine.split(' ')[0];
+					nextCommand = nextLine.slice(name.length).trim();
 				} else {
-	
-					switch (typeof v.value) {
-						case 'number':
-							if (Math.round(v.value) === v.value) {
-								dapVariable.value = this.formatNumber(v.value);
-								(<any>dapVariable).__vscodeVariableMenuContext = 'simple';	// enable context menu contribution
-								dapVariable.type = 'integer';
-							} else {
-								dapVariable.value = v.value.toString();
-								dapVariable.type = 'float';
-							}
-							break;
-						case 'string':
-							dapVariable.value = `"${v.value}"`;
-							break;
-						case 'boolean':
-							dapVariable.value = v.value ? 'true' : 'false';
-							break;
-						default:
-							dapVariable.value = typeof v.value;
-							break;
+					name = (nextLine !== '' ? nextLine : i.toString());
+					nextCommand = userLines[i + 2];
+				}
+
+				// Memory reference is the address of the variable aka the label.
+				const memoryReference:number = this.assemblyResult!.symbolTable[name];
+				if (memoryReference === undefined) {
+					return;
+				}
+				// The line after that may be a .BLKW directive, which we will use to determine the length of 
+				// the variable, otherwise we will assume it is 1.
+				// If the length is more than 1, we will create a parent variable with a new variable reference.
+				// Then create children variables referencing the parent variable.
+				var length = 1;
+				if (nextCommand.startsWith('.BLKW') && nextCommand.split(' ').length > 1){
+					length = this.parseLC3Number(nextCommand.split(' ')[1]);
+				}
+				let value = this.lc3.memory[memoryReference];
+				const variable: DebugProtocol.Variable = {
+					name: name,
+					value: this.formatNumber(value),
+					variablesReference: 0,
+					memoryReference: memoryReference.toString(),
+				};
+				if (length > 1) {
+					// Since the code passed assembly, we won't check the validity of memoryReference.
+					const staticArrayVariable: StaticArrayVariable = {
+						values: this.lc3.memory.slice(memoryReference, memoryReference + length),
+						variablesReference: 0,
+						address: memoryReference
+					};
+					const arrayVariableReference = this._variableHandles.create(staticArrayVariable);
+					staticArrayVariable.variablesReference = arrayVariableReference;
+					// This is now a parent variable. We will store a reference to StaticArrayVariable as the 
+					// variable reference, and the children will be generated in variablesRequest.
+					variable.value = 'Array[' + length + ']';
+					variable.variablesReference = arrayVariableReference;
+				}
+				
+				// .FILL and other invalid stuff are stored as binary.
+				variables.push(variable);
+			} else if (line.replace(' ', '').startsWith(";@VARIABLE:")){
+				
+				if(line.split(':').length < 3) {return;}
+				var name = line.split(':')[1];
+				var address = this.parseLC3Number(line.split(':')[2]);
+				// A dynamic array by default, the value can only be viewed in memory view.
+				const variable: DebugProtocol.Variable = {
+					name: name + '(' + this.format16BitHex(address) + ')',
+					value: '(View in memory ->)',
+					variablesReference: 0,
+					presentationHint: { kind: 'data', attributes: ['readOnly'] },
+					memoryReference: address.toString(),
+				};
+				if (line.split(':').length > 3) {
+					length = this.parseLC3Number(line.split(':')[3]);
+					if (length > 1) {
+						const staticArrayVariable: StaticArrayVariable = {
+							values: this.lc3.memory.slice(address, address + length),
+							variablesReference: 0,
+							address: address
+						};
+						const arrayVariableReference = this._variableHandles.create(staticArrayVariable);
+						staticArrayVariable.variablesReference = arrayVariableReference;
+						variable.value = 'Array[' + length + ']';
+						variable.variablesReference = arrayVariableReference;
+					} else {
+						variable.value = this.formatNumber(this.lc3.memory[address]);
 					}
 				}
+				variables.push(variable);
 			}
-	
-			if (v.memory) {
-				v.reference ??= this._variableHandles.create(v);
-				dapVariable.memoryReference = String(v.reference);
-			}
-	
-			return dapVariable;
+		});
+		return variables;
+	}
+
+	private parseLC3Number(x: string): number {
+		if (x.startsWith('x')) {
+			x = '0' + x;
 		}
-		*/
+		if (x.startsWith('#')) {
+			x = x.slice(1);
+		}
+		return parseInt(x);
+	}
 
 	private format16BitHex(x: number, pad = 4) {
 		return this._addressesInHex ? '0x' + x.toString(16).padStart(4, '0').toUpperCase() : x.toString(10);
