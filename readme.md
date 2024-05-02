@@ -21,4 +21,10 @@ The debugger implements the debug adapter protocal, the runtime and assembler is
 
 4. **Mark Variables**: Mark a label with `;@VARIABLE`, the corresponding memory address will be marked as a variable. You can view and edit them in the Variables view.
 
-5. **Call Stack**: *Work in progress*
+5. **Jump to Cursor**: Move the Program Counter to the cursor using the "Jump to Cursor" command in the right click menu. You can also move the PC in the variables panel in the right sidebar.
+
+6. **REPL Evaluation** (sort of): You can run individual lc3 commands or view variables in the debug console.
+
+7. **I/O Console**: It is suggested to turn off "collapse identical lines" feature in settings for optimal output. You can do this by modifying ```debug.console.collapseIdenticalLines``` in ```settings.json```.
+
+. **Call Stack**: *Work in progress*

@@ -16,7 +16,7 @@
 'use strict';
 
 import * as vscode from 'vscode';
-import { activateMockDebug, workspaceFileAccessor } from './activateMockDebug';
+import { activateMockDebug, workspaceFileAccessor } from './activateLC3Debugger';
 
 /*
  * The compile time flag 'runMode' controls how the debug adapter is run.
