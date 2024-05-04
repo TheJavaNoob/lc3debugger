@@ -67,9 +67,6 @@ export class LC3DebugSession extends LoggingDebugSession {
 	// the type of variable or an array to generate child variables in variablesRequest.
 	private _variableHandles = new Handles<'registers' | 'variables' | StaticArrayVariable>();
 
-	// a map of all running requests
-	private _cancellationTokens = new Map<number, boolean>();
-
 	private _valuesInHex = true;
 	private _useInvalidatedEvent = false;
 
@@ -84,15 +81,15 @@ export class LC3DebugSession extends LoggingDebugSession {
 
 	private lc3;
 
-	private batchMode = false;
-
 	private programPath = '';
 	private userCode = '';
 
+	// Used for the breakpointsRequest.
 	private breakpointID = 0;
 
 	private fileAssessor: FileAccessor;
 
+	// Used for the goto request.
 	private gotoTargetAddresses: number[] = [];
 
 	private isWaitingIO = false;
@@ -110,7 +107,10 @@ export class LC3DebugSession extends LoggingDebugSession {
 	*/
 	private pcTrace: number[] = [];
 
+	// True when the user pauses the program.
 	private isPaused = false;
+
+	private isDisassemblingOnStartup = false;
 
 	/**
 	 * Creates a new debug adapter that is used for one debug session.
@@ -269,8 +269,9 @@ export class LC3DebugSession extends LoggingDebugSession {
 		this.target = -Infinity;
 		await this.enterBatchMode();
 		// Opens the disassembly view when the program stops for the first time.
-		// TODO add a setting to disable this.
-		vscode.commands.executeCommand('debug.action.openDisassemblyView');
+		if (this.isDisassemblingOnStartup) {
+			vscode.commands.executeCommand('debug.action.openDisassemblyView');
+		}
 		this.sendResponse(response);
 	}
 
@@ -644,7 +645,7 @@ export class LC3DebugSession extends LoggingDebugSession {
 					key = "\n";
 				}
 				// sendKey accepts the ascii code of the key.
-				args.expression.split('').forEach((char) => {
+				key.split('').forEach((char) => {
 					this.lc3.sendKey(char.charCodeAt(0));
 				});
 				response.body = {
@@ -776,7 +777,10 @@ export class LC3DebugSession extends LoggingDebugSession {
 				this.sendEvent(new InvalidatedEvent(['variables']));
 			}
 			this.sendResponse(response);
-		} else {
+		} else if (command === 'toggleDisassembly') {
+			this.isDisassemblingOnStartup = !this.isDisassemblingOnStartup;
+			this.sendResponse(response);
+		} else{
 			super.customRequest(command, response, args);
 		}
 	}

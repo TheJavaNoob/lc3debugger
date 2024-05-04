@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { WorkspaceFolder, DebugConfiguration, ProviderResult, CancellationToken } from 'vscode';
 import { LC3DebugSession, FileAccessor } from './lc3Debugger';
 
-export function activateMockDebug(context: vscode.ExtensionContext, factory?: vscode.DebugAdapterDescriptorFactory) {
+export function activateLC3Debugger(context: vscode.ExtensionContext, factory?: vscode.DebugAdapterDescriptorFactory) {
 	context.subscriptions.push(
 		// Command for debugging the currently active editor contents
 		vscode.commands.registerCommand('extension.lc3-debugger.debugEditorContents', (resource: vscode.Uri) => {
@@ -29,7 +29,15 @@ export function activateMockDebug(context: vscode.ExtensionContext, factory?: vs
 			if (ds) {
 				ds.customRequest('toggleFormatting');
 			}
-		})
+		}),
+		// Command for toggling automatic disassembly
+		vscode.commands.registerCommand('extension.lc3-debugger.toggleDisassembly', (variable) => {
+			const ds = vscode.debug.activeDebugSession;
+			if (ds) {
+				ds.customRequest('toggleDisassembly');
+			}
+		}),
+		
 	);
 
 	context.subscriptions.push(vscode.commands.registerCommand('extension.lc3-debugger.getProgramName', config => {

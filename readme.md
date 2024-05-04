@@ -1,10 +1,10 @@
 # LC-3 Debugger
 
-This is a VSCode debugger for LC-3, an educational computer system featured in Patt&Patel, the textbook.
+This is a VSCode debugger for LC-3, an educational computer system featured in Patt&Patel, the textbook. It is developed by (Steve) Haoxiang Lin of ZJU-UIUC institute.
 
-*Currently in development, you can pull the repo and build it yourself. It will be avaliable in VSCode marketplace once it's complete.*
+This debugger is only an implementation of the debug adapter protocal, the runtime and assembler is written by [wChargin](https://github.com/wchargin/lc3web) in Javascript.
 
-The debugger implements the debug adapter protocal, the runtime and assembler is written by [wChargin](https://github.com/wchargin/lc3web) in Javascript.
+**This is an early beta version and is likely to have lots of bugs. For issues and bug reports, please go to the [GitHub issues page](https://github.com/TheJavaNoob/lc3debugger/issues)**
 
 ## Launching
 * Go to your .asm file
@@ -13,18 +13,40 @@ The debugger implements the debug adapter protocal, the runtime and assembler is
 * Press the green 'play' button to start debugging.
 
 ## Features
-1. **Breakpoints and Stepping**
+### **Breakpoints and Stepping**
+Standard debug functionalities such as breakpoints and stepping are supported, including step in, step out and step over.
 
-2. **View Memory**: The disassembly view automatically opens when the code starts running, you can open it in the right click menu. You can view the contents of memory and its corresponding instructions in the disassembly view.
+### **Multiple .ORIG directives**
+Unlike native lc3, the debugger supports multiple `.ORIG` directives in a single file.
 
-3. **View and Change Registers**: All registers, including PC is changable.
+      Note: Any `.ORIG` after the first one should only be used for data, since you can only set breakpoints for the first block, and labels in different blocks are not interaccessible and may even duplicate.
 
-4. **Mark Variables**: Mark a label with `;@VARIABLE`, the corresponding memory address will be marked as a variable. You can view and edit them in the Variables view.
+### **View Memory**
+The disassembly view can be used to view the contents of memory and its corresponding instructions.
 
-5. **Jump to Cursor**: Move the Program Counter to the cursor using the "Jump to Cursor" command in the right click menu. You can also move the PC in the variables panel in the right sidebar.
+* The disassembly view automatically when the code starts running by default. 
+* You can stop this by running `LC3Debugger: Toggle Auto Disassembly` in vscode command line. 
+* You can also open the disassembly view manually in the right click menu.
 
-6. **REPL Evaluation** (sort of): You can run individual lc3 commands or view variables in the debug console.
 
-7. **I/O Console**: It is suggested to turn off "collapse identical lines" feature in settings for optimal output. You can do this by modifying ```debug.console.collapseIdenticalLines``` in ```settings.json```.
+### **View and Change Registers**
+All registers, including PC is editable in the Variations panel.
 
-. **Call Stack**: *Work in progress*
+### **Mark Variables**
+Mark a label with `;@VARIABLE`, the corresponding memory address will be marked as a variable. You can view and edit them in the Variables view.
+
+* A `.FILL` directive will be treated as a single variable.
+* A `.BLKW` directive will be treated as an array.
+* A variable can also be explicitly declared using `@VARIABLE:name:address:length`
+
+### **Jump to Cursor**
+Move the Program Counter to the cursor using the "Jump to Cursor" command in the right click menu.
+
+* You can also move the PC in the variables panel in the right sidebar.
+
+### **REPL Evaluation**
+REPL-based runtime evaluations are supported.
+
+* Run individual commands or view variable/register values in DEBUG CONSOLE
+* Hover over variables/registers during runtime to check their value
+* Turn on `Debugger: Inline Values` in settings to display variable/register values besides the code during execution.

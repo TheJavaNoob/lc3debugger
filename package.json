@@ -1,8 +1,8 @@
 {
     "name": "lc3-debugger",
     "displayName": "LC-3 Debugger",
-    "version": "0.52.0",
-    "publisher": "TheJavaNoob",
+    "version": "0.1.0",
+    "publisher": "SteveLin",
     "description": "A vscode debugger for LC3.",
     "author": {
         "name": "Steve Lin"
@@ -106,6 +106,10 @@
             {
                 "command": "extension.lc3-debugger.toggleFormatting",
                 "title": "Toggle between decimal and hex formatting"
+            },
+            {
+                "command": "extension.lc3-debugger.toggleDisassembly",
+                "title": "Toggle auto disassembly"
             }
         ],
         "breakpoints": [

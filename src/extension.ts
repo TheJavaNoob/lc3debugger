@@ -16,17 +16,10 @@
 'use strict';
 
 import * as vscode from 'vscode';
-import { activateMockDebug, workspaceFileAccessor } from './activateLC3Debugger';
-
-/*
- * The compile time flag 'runMode' controls how the debug adapter is run.
- * Please note: the test suite only supports 'external' mode.
- */
-const runMode: 'external' | 'server' | 'namedPipeServer' | 'inline' = 'inline';
+import { activateLC3Debugger } from './activateLC3Debugger';
 
 export function activate(context: vscode.ExtensionContext) {
-	activateMockDebug(context);
-
+	activateLC3Debugger(context);
 }
 
 export function deactivate() {

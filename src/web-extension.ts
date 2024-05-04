@@ -9,10 +9,10 @@
  */
 
 import * as vscode from 'vscode';
-import { activateMockDebug } from './activateLC3Debugger';
+import { activateLC3Debugger } from './activateLC3Debugger';
 
 export function activate(context: vscode.ExtensionContext) {
-	activateMockDebug(context);	// activateMockDebug without 2nd argument launches the Debug Adapter "inlined"
+	activateLC3Debugger(context);	// activateMockDebug without 2nd argument launches the Debug Adapter "inlined"
 }
 
 export function deactivate() {

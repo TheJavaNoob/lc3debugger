@@ -7,3 +7,4 @@ mock-debug.txt
 *.vsix
 .DS_Store
 sampleWorkspace
+reference
