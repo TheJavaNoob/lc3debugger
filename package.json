@@ -9,7 +9,7 @@
     },
     "license": "MIT",
     "keywords": [
-        "multi-root ready"
+        "lc3 debugger"
     ],
     "engines": {
         "vscode": "^1.66.0"
